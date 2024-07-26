@@ -1,7 +1,7 @@
 CC = gcc
-CFLAGS = `pkg-config --cflags gtk+-3.0 libcurl`
+CFLAGS = `pkg-config --cflags gtk+-3.0 libcurl` -g
 LIBS = `pkg-config --libs gtk+-3.0 libcurl` -lssl -lcrypto -luuid
-OBJ = main.o gui.o ftp.o utils.o storage.o encryption.o
+OBJ = main.o gui.o ftp.o utils.o storage.o encryption.o loading_data.o
 BIN = LinkScribe
 
 all: $(OBJ)
@@ -24,6 +24,9 @@ storage.o: storage.c
 
 encryption.o: encryption.c
 	$(CC) -c $(CFLAGS) encryption.c
+
+loading_data.o: loading_data.c
+	$(CC) -c $(CFLAGS) loading_data.c
 
 clean:
 	rm -f $(OBJ) $(BIN)

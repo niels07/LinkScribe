@@ -8,7 +8,7 @@
 #include "encryption.h"
 
 
-#define FILE_PATH "ftp_details.dat" 
+#define FILE_PATH "data/ftp.dat" 
 
 void save_ftp_details(const FTPDetails *details) {
     FILE *file = fopen(FILE_PATH, "ab");
@@ -31,7 +31,6 @@ void save_ftp_details(const FTPDetails *details) {
 void load_ftp_details(GList **details_list) {
     FILE *file = fopen(FILE_PATH, "rb");
     if (file == NULL) {
-        perror("Failed to open file for reading");
         return;
     }
 
@@ -42,9 +41,7 @@ void load_ftp_details(GList **details_list) {
             free(details);
             break;
         }
-        printf("password before decryption: %s\n", details->password);
         decrypt_password(details->password, details->password);
-        printf("password after decryption: %s\n", details->password);
         *details_list = g_list_append(*details_list, details);
     }
 

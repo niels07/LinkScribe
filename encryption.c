@@ -1,6 +1,6 @@
-#include "encryption.h"
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include "encryption.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
