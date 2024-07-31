@@ -1,0 +1,3 @@
+/home/LinkScribe/build/CMakeFiles/LinkScribe.dir
+/home/LinkScribe/build/CMakeFiles/edit_cache.dir
+/home/LinkScribe/build/CMakeFiles/rebuild_cache.dir

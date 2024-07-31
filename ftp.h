@@ -12,6 +12,7 @@ typedef struct {
     char password[256];
     int port;
     char protocol[10];
+    char remote_path[1024];
     FTPOnConnect on_connect;
     FTPOnDirList on_dir_list;
     void *arg;
@@ -29,7 +30,8 @@ typedef struct {
     char protocol[10];
 } FTPDetails;
 
-void ftp_connect(const FTPDetails *details, FTPOnConnect on_connect, void *arg);
-void ftp_list_dirs(const FTPDetails *details, FTPOnDirList on_dir_list, void *arg);
+extern void ftp_connect(const FTPDetails *details, FTPOnConnect on_connect, void *arg);
+extern void ftp_list_dirs(const FTPDetails *details, FTPOnDirList on_dir_list, void *arg);
+extern char* request_ftp_list(FTPDetails *details, const char *path);
 
 #endif

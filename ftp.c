@@ -11,6 +11,11 @@ typedef struct {
     FTPConnectData *data;
 } DebugData;
 
+struct FtpBuffer {
+    char *data;
+    size_t size;
+};
+
 static int debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr) {
     DebugData *debug_data = (DebugData *)userptr;
     FTPConnectData *connect_data = debug_data->data;
@@ -52,22 +57,44 @@ static int debug_callback(CURL *handle, curl_infotype type, char *data, size_t s
 
 static size_t dir_list_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
     FTPConnectData *data = (FTPConnectData *)userdata;
-    size_t total_size = size * nmemb;
-    char *line = malloc(total_size + 1);
+    char *line = malloc(size * nmemb + 1);
     if (!line) {
         PRINT_ERROR("Memory allocation failure");
         return 0;
     }
-    memcpy(line, ptr, total_size);
-    line[total_size] = '\0';
+    memcpy(line, ptr, size * nmemb);
+    line[size * nmemb] = '\0';
     PRINT_MESSAGE("DIR LIST CALLBACK: Directory entry: %s", line);
-    if (data->on_dir_list) {
-        data->on_dir_list(data->arg, line);
+
+    if (g_utf8_validate(line, -1, NULL)) {
+        if (data->on_dir_list) {
+            data->on_dir_list(data->arg, line);
+        }
+    } else {
+        PRINT_ERROR("Invalid UTF-8 string received: %s", line);
     }
+
     free(line);
-    return total_size;
+    return size * nmemb;
 }
 
+static size_t write_callback(void *buffer, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct FtpBuffer *mem = (struct FtpBuffer *)userp;
+
+    char *ptr = realloc(mem->data, mem->size + realsize + 1);
+    if(ptr == NULL) {
+        // Out of memory
+        return 0;
+    }
+
+    mem->data = ptr;
+    memcpy(&(mem->data[mem->size]), buffer, realsize);
+    mem->size += realsize;
+    mem->data[mem->size] = 0;
+
+    return realsize;
+}
 static void* ftp_connect_thread(void *arg) {
     FTPConnectData *data = (FTPConnectData *)arg;
     if (!data) {
@@ -137,8 +164,8 @@ static void* ftp_list_dirs_thread(void *arg) {
         return NULL;
     }
 
-    char url[280];
-    snprintf(url, sizeof(url), "%s://%s:%d", data->protocol, data->host, data->port);
+    char url[2048];
+    snprintf(url, sizeof(url), "%s://%s:%d%s", data->protocol, data->host, data->port, data->remote_path);
     PRINT_MESSAGE("Requesting directory list from %s", url);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -168,16 +195,9 @@ static void* ftp_list_dirs_thread(void *arg) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     }
 
-    // Increase timeouts
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 60L); // Increase connection timeout to 60 seconds
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L); // Increase overall operation timeout to 120 seconds
-    curl_easy_setopt(curl, CURLOPT_FTP_RESPONSE_TIMEOUT, 30L); // Set FTP response timeout to 30 seconds
-
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "NLST"); // Explicitly set NLST command for FTP
-
-    // Enable passive mode
-    curl_easy_setopt(curl, CURLOPT_FTP_USE_EPSV, 1L); // Enable EPSV mode
-    curl_easy_setopt(curl, CURLOPT_FTP_USE_EPRT, 1L); // Enable EPRT mode
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "LIST");
+    curl_easy_setopt(curl, CURLOPT_FTP_USE_EPSV, 0L);
+    curl_easy_setopt(curl, CURLOPT_FTP_USE_EPRT, 0L);
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK) {
@@ -231,12 +251,13 @@ void ftp_list_dirs(const FTPDetails *details, FTPOnDirList on_dir_list, void *ar
         PRINT_ERROR("Memory allocation failed.");
         return;
     }
-    memset(data, 0, sizeof(FTPConnectData)); // Ensure all fields are initialized
+    memset(data, 0, sizeof(FTPConnectData));
     strncpy(data->host, details->host, sizeof(data->host) - 1);
     strncpy(data->username, details->username, sizeof(data->username) - 1);
     strncpy(data->password, details->password, sizeof(data->password) - 1);
     data->port = details->port;
     strncpy(data->protocol, details->protocol, sizeof(data->protocol) - 1);
+    strncpy(data->remote_path, details->remote_path, sizeof(data->remote_path) - 1);
     data->on_connect = NULL;
     data->on_dir_list = on_dir_list;
     data->arg = arg;
@@ -248,4 +269,37 @@ void ftp_list_dirs(const FTPDetails *details, FTPOnDirList on_dir_list, void *ar
         return;
     }
     pthread_detach(thread_id);
+}
+
+char* request_ftp_list(FTPDetails *details, const char *path) {
+    CURL *curl;
+    CURLcode res;
+    struct FtpBuffer ftpbuf = { .data = NULL, .size = 0 };
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl = curl_easy_init();
+    if(curl) {
+        char url[768];
+        snprintf(url, sizeof(url), "ftp://%s:%d%s", details->host, details->port, path);
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_USERNAME, details->username);
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, details->password);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ftpbuf);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        res = curl_easy_perform(curl);
+
+        if(res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+            free(ftpbuf.data);
+            ftpbuf.data = NULL;
+        }
+
+        curl_easy_cleanup(curl);
+    }
+
+    curl_global_cleanup();
+    return ftpbuf.data;
 }
